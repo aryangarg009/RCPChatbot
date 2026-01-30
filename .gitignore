@@ -2,3 +2,8 @@
 __pycache__/
 Combined_AllMetrics.csv
 .DS_Store
+.DS_Store
+.venv/
+__pycache__/
+.env
+.env.local
