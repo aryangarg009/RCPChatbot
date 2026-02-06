@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from chat_service import process_question
+from chat_service import process_question_with_fallback
 from config import CSV_PATH
 from date_io import load_data
 
@@ -32,4 +32,4 @@ _DF = load_data(CSV_PATH)
 
 @app.post("/chat")
 def chat(req: ChatRequest) -> Dict[str, Any]:
-    return process_question(req.message, _DF, req.context)
+    return process_question_with_fallback(req.message, _DF, req.context)

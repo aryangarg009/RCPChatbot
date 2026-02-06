@@ -5,7 +5,14 @@ from typing import Any, Dict, Optional, Tuple
 
 from pydantic import ValidationError
 
-from config import ALLOWED_GAMES, ALLOWED_METRICS, ALLOWED_SESSIONS, RESET_COMMANDS
+from config import (
+    ALLOWED_GAMES,
+    ALLOWED_METRICS,
+    ALLOWED_SESSIONS,
+    CSV_PATH,
+    ENABLE_CODE_FALLBACK,
+    RESET_COMMANDS,
+)
 from context import (
     apply_followup_context,
     extract_metric_from_text,
@@ -36,6 +43,7 @@ from summarizer import (
     summarize_session_range,
     summarize_timeseries,
 )
+from openai_fallback import OpenAIFallbackError, run_code_fallback
 
 
 def _is_session_range_question(text: str) -> bool:
@@ -356,4 +364,53 @@ def process_question(question: str, df, context: Optional[Dict[str, Any]] = None
         "answer": answer,
         "data": {"spec": spec.model_dump(), "results": results, "summary": summary},
         "context": _context_from_state(last_spec, last_session_range),
+    }
+
+
+def _should_code_fallback(error_answer: str) -> bool:
+    if not ENABLE_CODE_FALLBACK:
+        return False
+    lower = error_answer.strip().lower()
+    if lower.startswith("please specify"):
+        return False
+    if "context cleared" in lower:
+        return False
+    return True
+
+
+def process_question_with_fallback(
+    question: str, df, context: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    resp = process_question(question, df, context)
+    if resp.get("type") != "error":
+        return resp
+
+    error_answer = resp.get("answer", "")
+    if not _should_code_fallback(error_answer):
+        return resp
+
+    fallback_context = {
+        "deterministic_error": error_answer,
+        "context": resp.get("context"),
+    }
+
+    try:
+        result = run_code_fallback(question, CSV_PATH, fallback_context)
+    except OpenAIFallbackError as e:
+        resp["answer"] = f"{error_answer} (code fallback failed: {e})"
+        return resp
+    except Exception as e:
+        resp["answer"] = f"{error_answer} (code fallback error: {e})"
+        return resp
+
+    answer = result.get("answer") or "Fallback completed."
+    return {
+        "type": "code_fallback",
+        "answer": answer,
+        "data": {
+            "execution_path": "code_fallback",
+            "fallback_reason": error_answer,
+            "result": result,
+        },
+        "context": resp.get("context"),
     }

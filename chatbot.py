@@ -4,7 +4,14 @@ from typing import Optional
 
 from pydantic import ValidationError
 
-from config import CSV_PATH, RESET_COMMANDS, ALLOWED_METRICS, ALLOWED_GAMES, ALLOWED_SESSIONS
+from config import (
+    CSV_PATH,
+    RESET_COMMANDS,
+    ALLOWED_METRICS,
+    ALLOWED_GAMES,
+    ALLOWED_SESSIONS,
+    ENABLE_CODE_FALLBACK,
+)
 from schema import QuerySpec
 from date_io import load_data, extract_dates_from_text
 from llm_client import llm_question_to_query
@@ -29,6 +36,7 @@ from query_engine import (
 from summarizer import summarize_timeseries, summarize_session_range, is_point_query, format_point_result
 from narration import narrate_timeseries, narrate_point, narrate_session_comparison, narrate_session_range
 from metrics import METRIC_EXPLANATIONS
+from openai_fallback import OpenAIFallbackError, run_code_fallback
 
 def main():
     print("Loading CSV...")
@@ -38,6 +46,45 @@ def main():
 
     last_spec: Optional[QuerySpec] = None
     last_session_range: Optional[tuple[str, str]] = None
+
+    def _should_code_fallback(error_text: str) -> bool:
+        if not ENABLE_CODE_FALLBACK:
+            return False
+        lower = error_text.strip().lower()
+        if lower.startswith("please specify"):
+            return False
+        if "context cleared" in lower:
+            return False
+        return True
+
+    def _try_code_fallback(question: str, reason: str) -> bool:
+        if not _should_code_fallback(reason):
+            return False
+        context = {
+            "deterministic_error": reason,
+            "last_spec": last_spec.model_dump() if last_spec is not None else None,
+            "last_session_range": list(last_session_range) if last_session_range else None,
+        }
+        try:
+            result = run_code_fallback(question, CSV_PATH, context)
+        except OpenAIFallbackError as e:
+            print(f"\n[ERROR] Code fallback failed: {e}\n")
+            return False
+        except Exception as e:
+            print(f"\n[ERROR] Code fallback error: {e}\n")
+            return False
+
+        print("\n[CODE FALLBACK]")
+        print(result.get("answer", "Fallback completed."))
+        if "data" in result:
+            print("\nData:")
+            print(json.dumps(result["data"], indent=2))
+        if "warnings" in result and result["warnings"]:
+            print("\nWarnings:")
+            for w in result["warnings"]:
+                print(f"- {w}")
+        print("")
+        return True
 
     while True:
         q = input("You: ").strip()
@@ -112,6 +159,7 @@ def main():
                 if "error" in cmp_out:
                     print(cmp_out["error"])
                     print("")
+                    _try_code_fallback(q, cmp_out["error"])
                     continue
 
                 print(narrate_session_comparison(cmp_out))
@@ -150,9 +198,11 @@ def main():
         except (ValidationError, ValueError, json.JSONDecodeError) as e:
             print("\n[BLOCKED] Model output failed strict validation.")
             print(f"Reason: {e}\n")
+            _try_code_fallback(q, f"Model output failed strict validation: {e}")
             continue
         except Exception as e:
             print(f"\n[ERROR] LLM request failed: {e}\n")
+            _try_code_fallback(q, f"LLM request failed: {e}")
             continue
 
         sessions_in_q = extract_sessions_from_text(q)
@@ -179,6 +229,7 @@ def main():
                 print("\nAnswer:")
                 print(results[0].get("error", "No results found."))
                 print("")
+                _try_code_fallback(q, results[0].get("error", "No results found."))
                 continue
 
             summary = summarize_session_range(
@@ -226,6 +277,7 @@ def main():
                 print("\nAnswer:")
                 print(results[0].get("error", "No results found."))
                 print("")
+                _try_code_fallback(q, results[0].get("error", "No results found."))
                 continue
 
             summary = summarize_session_range(
@@ -286,6 +338,7 @@ def main():
             if "error" in cmp_out:
                 print(cmp_out["error"])
                 print("")
+                _try_code_fallback(q, cmp_out["error"])
                 continue
 
             print(narrate_session_comparison(cmp_out))
@@ -310,6 +363,7 @@ def main():
             print("\nAnswer:")
             print(results[0].get("error", "No results found."))
             print("")
+            _try_code_fallback(q, results[0].get("error", "No results found."))
             continue
 
         # ---- POINT QUERY MODE ----
