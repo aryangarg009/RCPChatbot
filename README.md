@@ -4,7 +4,7 @@ This repo is a deterministic backend for patient rehab metrics.
 The LLM is used only to parse a user question into a strict JSON query spec.
 All data processing and answers are computed in Python.
 
-## Quick Start (Non-Technical Friendly)
+## Quick Start
 
 ### 1) Install Python
 You need Python 3.10 or higher.
