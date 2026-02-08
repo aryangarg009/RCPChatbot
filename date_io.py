@@ -63,9 +63,6 @@ def apply_open_ended_date_logic(spec: QuerySpec, question: str) -> QuerySpec:
 def load_data(csv_path: str) -> pd.DataFrame:
     df = pd.read_csv(csv_path)
 
-    if "avg_f_patient" in df.columns and "f_patient" not in df.columns:
-        df = df.rename(columns={"avg_f_patient": "f_patient"})
-
     # Normalize key string columns to avoid hidden whitespace mismatches
     for col in ["patient_id", "game", "session"]:
         if col in df.columns:

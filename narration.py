@@ -23,7 +23,7 @@ def metric_display_name(metric: str) -> str:
     names = {
         "average_sparc": "smoothness (SPARC)",
         "avg_efficiency": "efficiency",
-        "f_patient": "total force",
+        "avg_f_patient": "total force",
         "area": "range of motion (area)",
     }
     return names.get(metric, metric)
@@ -33,7 +33,7 @@ def _metric_label(metric: str) -> str:
         "average_sparc": "movement smoothness",
         "area": "range of motion",
         "avg_efficiency": "movement efficiency",
-        "f_patient": "applied force",
+        "avg_f_patient": "applied force",
     }
     return labels.get(metric, metric)
 

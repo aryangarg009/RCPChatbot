@@ -16,16 +16,9 @@ _RAW_METRIC_ALIAS_MAP = {
     "efficiency": "avg_efficiency",
     "efficient": "avg_efficiency",
 
-    "path ratio": "avg_path_ratio",
-    "pathratio": "avg_path_ratio",
-
-    "mean deviation": "avg_mean_dev",
-    "max deviation": "avg_max_dev",
-
-    "force": "f_patient",
-    "strength": "f_patient",
-    "f_patient": "f_patient",
-    "avg_f_patient": "f_patient",
+    "force": "avg_f_patient",
+    "strength": "avg_f_patient",
+    "avg_f_patient": "avg_f_patient",
 
     "area": "area",
     "range of motion": "area",

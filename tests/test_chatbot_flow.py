@@ -420,7 +420,7 @@ def test_expected_conversation_flow(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     out7 = bot.ask(q7)
-    assert out7["spec"].metric == "f_patient"
+    assert out7["spec"].metric == "avg_f_patient"
     assert out7["answer"] == (
         "I found patient records from 2022-02-25 to 2022-03-10. "
         "Over this period, the average applied force remained stable by 0.0000. "

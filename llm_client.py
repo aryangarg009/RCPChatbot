@@ -73,10 +73,7 @@ Rules:
   - "smoothness" or "sparc" -> "average_sparc"
   - "range of motion" or "rom" -> "area"
   - "efficiency" -> "avg_efficiency"
-  - "force" or "strength" -> "f_patient"
-  - "path ratio" -> "avg_path_ratio"
-  - "mean deviation" -> "avg_mean_dev"
-  - "max deviation" -> "avg_max_dev"
+  - "force" or "strength" -> "avg_f_patient"
 - patient_id must be the exact string like "45_M" if mentioned.
 - If session is null, date_start must be present. date_end may be "__MISSING__" for open-ended queries like "since <date>".
 - If a session is specified and the question does not include dates, set date_start and date_end to "__MISSING__".

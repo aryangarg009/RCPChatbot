@@ -15,7 +15,7 @@ METRIC_EXPLANATIONS: Dict[str, str] = {
         "Efficiency reflects how effectively the patient completes the movement. Higher values "
         "generally suggest more efficient, accurate movement."
     ),
-    "f_patient": (
+    "avg_f_patient": (
         "Patient-applied force reflects how much force the patient is applying during the task. "
         "Higher values generally suggest greater force output."
     ),
@@ -27,5 +27,5 @@ METRIC_DISPLAY_NAMES: Dict[str, str] = {
     "average_sparc": "smoothness (SPARC)",
     "area": "range of motion (area)",
     "avg_efficiency": "efficiency",
-    "f_patient": "total force",
+    "avg_f_patient": "total force",
 }

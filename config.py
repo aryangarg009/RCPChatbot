@@ -12,22 +12,13 @@ OPENAI_CODE_CONTAINER_MEMORY = "1g"  # 1g|4g|16g|64g
 ALLOWED_METRICS = sorted([
     "average_sparc",
     "avg_efficiency",
-    "avg_path_ratio",
-    "avg_mean_dev",
-    "avg_max_dev",
-    "avg_actual_len",
-    "avg_ideal_len",
-    "avg_excess_len",
-    "f_patient",
-    "avg_f_ee",
-    "diff_from_prev",
-    "improvement",
+    "avg_f_patient",
     "area",
 ])
 
 ALLOWED_RETURN_COLUMNS = sorted([
-    "date", "patient_id", "patient", "game", "session",
-    *ALLOWED_METRICS
+    "date", "patient_id", "game", "session",
+    *ALLOWED_METRICS,
 ])
 
 ALLOWED_GAMES = [f"game{i}" for i in range(0, 3)]
