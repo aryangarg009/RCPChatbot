@@ -1,7 +1,12 @@
 # config.py
 CSV_PATH = "Combined_AllMetrics.csv"
-LMSTUDIO_URL = "http://127.0.0.1:1234/v1/chat/completions"
-MODEL = "qwen2.5-7b-instruct"  # must match LM Studio "API identifier"
+
+# Parser backend: "openai" (default) or "lmstudio"
+PARSER_BACKEND = "openai"
+
+# LM Studio parser (uncomment and set PARSER_BACKEND="lmstudio" to use)
+# LMSTUDIO_URL = "http://127.0.0.1:1234/v1/chat/completions"
+# MODEL = "qwen2.5-7b-instruct"  # must match LM Studio "API identifier"
 
 # Provider-managed code execution fallback (OpenAI Responses API)
 ENABLE_CODE_FALLBACK = True
