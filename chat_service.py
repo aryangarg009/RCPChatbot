@@ -1,6 +1,7 @@
 # chat_service.py
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, Optional, Tuple
 
 from pydantic import ValidationError
@@ -16,6 +17,8 @@ from config import (
 from context import (
     apply_followup_context,
     extract_metric_from_text,
+    extract_metric_or_alias_from_definition_question,
+    is_metric_definition_question,
     question_mentions_dates,
     question_mentions_game,
     question_mentions_patient,
@@ -28,6 +31,7 @@ from narration import (
     narrate_session_range,
     narrate_timeseries,
 )
+from metrics import METRIC_EXPLANATIONS
 from query_engine import (
     compare_two_sessions,
     detect_relative_session_cue,
@@ -92,6 +96,41 @@ def process_question(question: str, df, context: Optional[Dict[str, Any]] = None
             "context": _context_from_state(None, None),
         }
 
+    # ---- METRIC DEFINITION MODE ----
+    # Only treat as a definition question if the user isn't asking about
+    # a specific patient/game/session/date.
+    if (
+        is_metric_definition_question(question)
+        and not question_mentions_patient(question)
+        and not question_mentions_game(question)
+        and not question_mentions_session(question)
+        and not question_mentions_dates(question)
+    ):
+        metric = extract_metric_or_alias_from_definition_question(question)
+        if metric is None:
+            return {
+                "type": "error",
+                "answer": "I’m not sure which metric you mean. Try: 'what is sparc?' or 'what does efficiency mean?'",
+                "data": None,
+                "context": _context_from_state(last_spec, last_session_range),
+            }
+
+        explanation = METRIC_EXPLANATIONS.get(metric)
+        if explanation is None:
+            return {
+                "type": "error",
+                "answer": f"I don’t have an explanation written yet for '{metric}', but I can add one.",
+                "data": None,
+                "context": _context_from_state(last_spec, last_session_range),
+            }
+
+        return {
+            "type": "definition",
+            "answer": explanation,
+            "data": {"metric": metric},
+            "context": _context_from_state(last_spec, last_session_range),
+        }
+
     # ---- SESSION COMPARISON MODE (follow-up) ----
     if ("differ" in ql or "difference" in ql or "compare" in ql) and last_spec is not None:
         # If user explicitly mentions patient/metric/game, treat as standalone compare
@@ -141,12 +180,26 @@ def process_question(question: str, df, context: Optional[Dict[str, Any]] = None
         spec = llm_question_to_query(question)
         spec = apply_followup_context(spec, question, last_spec)
 
+        # Resolve relative session cues like "next/previous/first/latest session"
+        cue = detect_relative_session_cue(question)
+        if cue is not None:
+            if last_spec is None:
+                raise ValueError("No prior session in context to resolve a relative session.")
+            resolved = resolve_relative_session(df, last_spec, cue)
+            if "error" in resolved:
+                raise ValueError(resolved["error"])
+            spec.session = resolved["session"]
+            # Session-based query: clear date range
+            spec.date_start = "__MISSING__"
+            spec.date_end = "__MISSING__"
+
         if spec.metric not in ALLOWED_METRICS and spec.metric != "__MISSING__":
             raise ValueError(f"Metric '{spec.metric}' not allowed.")
         if spec.game is not None and spec.game not in ALLOWED_GAMES:
             raise ValueError(f"Game '{spec.game}' not allowed. Must be one of {ALLOWED_GAMES}.")
-        if spec.session is not None and spec.session != "__MULTI__" and spec.session not in ALLOWED_SESSIONS:
-            raise ValueError(f"Session '{spec.session}' not allowed. Must be one of {ALLOWED_SESSIONS}.")
+        if spec.session is not None and spec.session != "__MULTI__":
+            if re.match(r"^session_\d+$", str(spec.session)) is None:
+                raise ValueError(f"Session '{spec.session}' not allowed. Must match 'session_<number>'.")
 
     except (ValidationError, ValueError) as e:
         return {
@@ -372,6 +425,8 @@ def _should_code_fallback(error_answer: str) -> bool:
         return False
     lower = error_answer.strip().lower()
     if lower.startswith("please specify"):
+        return False
+    if "not allowed" in lower or "metric '" in lower:
         return False
     if "context cleared" in lower:
         return False

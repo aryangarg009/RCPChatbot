@@ -39,6 +39,8 @@ Response:
 ```bash
 python chatbot.py
 ```
+Note: the CLI is a thin wrapper around the same shared logic used by the HTTP API
+(`process_question_with_fallback` in `chat_service.py`), so behavior should be identical.
 
 ### Quick test (API)
 ```bash

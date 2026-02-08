@@ -66,33 +66,47 @@ def resolve_relative_session(
     subset = subset[subset["game"].astype(str).str.strip() == base_spec.game]
 
     sessions = sorted({s for s in subset["session"].astype(str).str.strip() if s})
-    numbered = []
+    items = []
     for s in sessions:
         n = _session_num(s)
-        if n is not None:
-            numbered.append((n, s))
+        # Use earliest date for each session when available (datewise ordering)
+        session_rows = subset[subset["session"].astype(str).str.strip() == s]
+        min_date = None
+        if "date" in session_rows.columns and not session_rows.empty:
+            dt = pd.to_datetime(session_rows["date"], errors="coerce")
+            dt = dt[dt.notna()]
+            if not dt.empty:
+                min_date = dt.min()
+        items.append({"session": s, "num": n, "min_date": min_date})
 
-    if not numbered:
+    if not items:
         return {"error": "No comparable sessions found for that patient/game."}
 
-    numbered.sort(key=lambda x: x[0])
-    nums = [n for n, _ in numbered]
-    sessions_by_num = {n: s for n, s in numbered}
+    # Prefer datewise ordering when any dates are available; fallback to session number
+    if any(it["min_date"] is not None for it in items):
+        items.sort(key=lambda it: (it["min_date"] or pd.Timestamp.max, it["num"] or 10**12, it["session"]))
+    else:
+        items.sort(key=lambda it: (it["num"] or 10**12, it["session"]))
+
+    ordered_sessions = [it["session"] for it in items]
 
     if cue == "first":
-        return {"session": sessions_by_num[nums[0]]}
+        return {"session": ordered_sessions[0]}
     if cue == "latest":
-        return {"session": sessions_by_num[nums[-1]]}
+        return {"session": ordered_sessions[-1]}
+
+    if base_spec.session not in ordered_sessions:
+        return {"error": f"Base session '{base_spec.session}' not found for that patient/game."}
+
+    idx = ordered_sessions.index(base_spec.session)
     if cue == "previous":
-        prev_nums = [n for n in nums if n < base_num]
-        if not prev_nums:
+        if idx == 0:
             return {"error": "No previous session found before the current session."}
-        return {"session": sessions_by_num[prev_nums[-1]]}
+        return {"session": ordered_sessions[idx - 1]}
     if cue == "next":
-        next_nums = [n for n in nums if n > base_num]
-        if not next_nums:
+        if idx == len(ordered_sessions) - 1:
             return {"error": "No next session found after the current session."}
-        return {"session": sessions_by_num[next_nums[0]]}
+        return {"session": ordered_sessions[idx + 1]}
 
     return {"error": "Unrecognized relative session cue."}
 

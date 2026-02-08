@@ -1,6 +1,7 @@
 # llm_client.py
 import json
 import re
+from typing import Optional
 
 import httpx
 from pydantic import ValidationError
@@ -11,7 +12,7 @@ from config import (
 )
 from schema import QuerySpec
 from date_io import parse_date_to_iso, apply_open_ended_date_logic, extract_dates_from_text
-from query_engine import normalize_session_string  # safe, no circular import
+from query_engine import normalize_session_string, detect_relative_session_cue  # safe, no circular import
 from context import normalize_metric_alias
 
 def extract_json_strict(text: str) -> str:
@@ -59,7 +60,31 @@ def normalize_llm_obj(obj: dict) -> dict:
 
     return obj
 
+def _find_disallowed_metric_token(question: str) -> Optional[str]:
+    """
+    Detect explicit snake_case metric tokens that are NOT in ALLOWED_METRICS.
+    This prevents the LLM from silently substituting a different metric.
+    """
+    tokens = re.findall(r"\b[a-zA-Z]+_[a-zA-Z0-9_]+\b", question)
+    allowed_lower = {m.lower() for m in ALLOWED_METRICS}
+    for tok in tokens:
+        t = tok.lower()
+        if re.match(r"^\d+_[mf]$", t):
+            continue  # patient_id like 45_M
+        if re.match(r"^session_\d+$", t):
+            continue
+        if re.match(r"^game\d+$", t):
+            continue
+        if t in allowed_lower:
+            continue
+        return tok
+    return None
+
 def llm_question_to_query(question: str) -> QuerySpec:
+    bad_token = _find_disallowed_metric_token(question)
+    if bad_token is not None:
+        raise ValueError(f"Metric '{bad_token}' not allowed.")
+
     system_prompt = f"""
 You are a strict query generator for a medical data CSV.
 You MUST output ONLY ONE valid JSON object and NOTHING ELSE.
@@ -83,6 +108,7 @@ Rules:
 - Do NOT guess the game. Only set it if explicitly mentioned in the user question.
 - If the question mentions a session like "session_1", "session_2", etc., set "session" to that exact string (case-sensitive). Otherwise set "session" to null.
 - Do NOT guess the session. Only set it if explicitly mentioned in the user question.
+- If the question uses relative session language (next/previous/latest/first), set "session" to null (do NOT use __NEXT__/__PREVIOUS__/etc).
 - If the question mentions MORE THAN ONE game, set "game" to "__MULTI__".
 - If the question mentions MORE THAN ONE session, set "session" to "__MULTI__".
 
@@ -124,6 +150,12 @@ it is allowed for date_start and date_end to be "__MISSING__".
             ns = normalize_session_string(spec.session)
             if ns is not None:
                 spec.session = ns
+            elif str(spec.session).upper() in {"__NEXT__", "__PREVIOUS__", "__FIRST__", "__LATEST__"}:
+                spec.session = None
+
+    # If the user used relative session language, defer resolution to follow-up logic
+    if detect_relative_session_cue(question) is not None:
+        spec.session = None
 
     # Normalize metric aliases (e.g., "range_of_motion" -> "area")
     spec.metric = normalize_metric_alias(spec.metric, question)
@@ -143,9 +175,10 @@ it is allowed for date_start and date_end to be "__MISSING__".
     if spec.game is not None and spec.game not in ALLOWED_GAMES:
         raise ValueError(f"Game '{spec.game}' not allowed. Must be one of {ALLOWED_GAMES}.")
 
-    # Validate session explicitly
-    if spec.session is not None and spec.session != "__MULTI__" and spec.session not in ALLOWED_SESSIONS:
-        raise ValueError(f"Session '{spec.session}' not allowed. Must be one of {ALLOWED_SESSIONS}.")
+    # Validate session explicitly (format only)
+    if spec.session is not None and spec.session != "__MULTI__":
+        if re.match(r"^session_\d+$", str(spec.session)) is None:
+            raise ValueError(f"Session '{spec.session}' not allowed. Must match 'session_<number>'.")
 
     # Normalize dates to ISO (ONLY if not already ISO)
     iso_pat = r"^\d{4}-\d{2}-\d{2}$"

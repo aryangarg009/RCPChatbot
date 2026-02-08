@@ -39,10 +39,13 @@ def looks_like_followup(question: str) -> bool:
     return any(cue in q for cue in FOLLOWUP_CUES)
 
 def question_mentions_patient(question: str) -> bool:
-    return re.search(r"\b\d+_[MF]\b", question) is not None
+    return (
+        re.search(r"\b\d+_[MF]\b", question) is not None
+        or re.search(r"\b\d+\s*[MF]\b", question) is not None
+    )
 
 def question_mentions_game(question: str) -> bool:
-    return re.search(r"\bgame[0-9]+\b", question) is not None
+    return re.search(r"\bgame\s*\d+\b", question, re.IGNORECASE) is not None
 
 def question_mentions_session(question: str) -> bool:
     return re.search(r"\bsession[_\s]*\d+\b", question.lower()) is not None
@@ -128,15 +131,19 @@ def apply_followup_context(
     if last_spec is None:
         return new_spec
 
+    followup = looks_like_followup(question)
+
     # Metric
     explicit_metric = extract_metric_from_text(question)
     if explicit_metric is not None:
         new_spec.metric = explicit_metric
-    elif new_spec.metric == "__MISSING__":
+    elif followup or new_spec.metric == "__MISSING__":
         new_spec.metric = last_spec.metric
 
     # Patient
-    if new_spec.patient_id == "__MISSING__" and not question_mentions_patient(question):
+    if (followup and not question_mentions_patient(question)) or (
+        new_spec.patient_id == "__MISSING__" and not question_mentions_patient(question)
+    ):
         new_spec.patient_id = last_spec.patient_id
 
     # Dates
@@ -145,14 +152,18 @@ def apply_followup_context(
         new_spec.date_end = last_spec.date_end
 
     # Game
-    if new_spec.game is None and not question_mentions_game(question):
+    if (followup and not question_mentions_game(question)) or (
+        new_spec.game is None and not question_mentions_game(question)
+    ):
         new_spec.game = last_spec.game
 
     # Session
     if question_mentions_dates(question) and not question_mentions_session(question):
         # If the user gave dates, do not carry over a prior session.
         new_spec.session = None
-    elif new_spec.session is None and not question_mentions_session(question):
+    elif (followup and not question_mentions_session(question)) or (
+        new_spec.session is None and not question_mentions_session(question)
+    ):
         new_spec.session = last_spec.session
 
     return new_spec
