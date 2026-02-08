@@ -12,8 +12,8 @@ from config import (
 )
 from schema import QuerySpec
 from date_io import parse_date_to_iso, apply_open_ended_date_logic, extract_dates_from_text
-from query_engine import normalize_session_string, detect_relative_session_cue  # safe, no circular import
-from context import normalize_metric_alias
+from query_engine import normalize_session_string, detect_relative_session_cue, extract_sessions_from_text  # safe, no circular import
+from context import normalize_metric_alias, extract_patient_from_text, is_duration_question, extract_metric_from_text
 
 def extract_json_strict(text: str) -> str:
     """
@@ -38,17 +38,19 @@ def normalize_llm_obj(obj: dict) -> dict:
     Convert missing/None LLM outputs into our explicit __MISSING__ placeholders
     so QuerySpec validation never crashes before follow-up context can apply.
     """
+    if "patient" not in obj and "patient_id" in obj:
+        obj["patient"] = obj.get("patient_id")
     obj.setdefault("action", "get_metric_timeseries")
-    obj.setdefault("patient_id", "__MISSING__")
+    obj.setdefault("patient", "__MISSING__")
     obj.setdefault("metric", "__MISSING__")
     obj.setdefault("date_start", "__MISSING__")
     obj.setdefault("date_end", "__MISSING__")
     obj.setdefault("game", None)
     obj.setdefault("session", None)
-    obj.setdefault("return_columns", ["date", "patient_id", "metric_value"])
+    obj.setdefault("return_columns", ["date", "patient", "metric_value"])
 
-    if obj.get("patient_id") is None:
-        obj["patient_id"] = "__MISSING__"
+    if obj.get("patient") is None:
+        obj["patient"] = "__MISSING__"
     if obj.get("metric") is None:
         obj["metric"] = "__MISSING__"
     if obj.get("date_start") is None:
@@ -69,8 +71,6 @@ def _find_disallowed_metric_token(question: str) -> Optional[str]:
     allowed_lower = {m.lower() for m in ALLOWED_METRICS}
     for tok in tokens:
         t = tok.lower()
-        if re.match(r"^\d+_[mf]$", t):
-            continue  # patient_id like 45_M
         if re.match(r"^session_\d+$", t):
             continue
         if re.match(r"^game\d+$", t):
@@ -99,11 +99,12 @@ Rules:
   - "range of motion" or "rom" -> "area"
   - "efficiency" -> "avg_efficiency"
   - "force" or "strength" -> "avg_f_patient"
-- patient_id must be the exact string like "45_M" if mentioned.
+- "session duration" or "how long" -> "timestampms"
+- patient must be the exact digits (e.g., "46") if mentioned.
 - If session is null, date_start must be present. date_end may be "__MISSING__" for open-ended queries like "since <date>".
 - If a session is specified and the question does not include dates, set date_start and date_end to "__MISSING__".
 - If game/session not specified, set them to null.
-- return_columns must be exactly: ["date","patient_id","metric_value"].
+- return_columns must be exactly: ["date","patient","metric_value"].
 - If the question mentions a game like "game0", "game1", "game2", or "game3", set "game" to that exact string (case-sensitive). Otherwise set "game" to null.
 - Do NOT guess the game. Only set it if explicitly mentioned in the user question.
 - If the question mentions a session like "session_1", "session_2", etc., set "session" to that exact string (case-sensitive). Otherwise set "session" to null.
@@ -112,8 +113,8 @@ Rules:
 - If the question mentions MORE THAN ONE game, set "game" to "__MULTI__".
 - If the question mentions MORE THAN ONE session, set "session" to "__MULTI__".
 
-If the question is missing patient_id or metric, output:
-{{"action":"get_metric_timeseries","patient_id":"__MISSING__","metric":"__MISSING__","date_start":"__MISSING__","date_end":"__MISSING__","game":null,"session":null,"return_columns":["date","patient_id","metric_value"]}}
+If the question is missing patient or metric, output:
+{{"action":"get_metric_timeseries","patient":"__MISSING__","metric":"__MISSING__","date_start":"__MISSING__","date_end":"__MISSING__","game":null,"session":null,"return_columns":["date","patient","metric_value"]}}
 
 If a session is explicitly specified in the question and dates are not mentioned,
 it is allowed for date_start and date_end to be "__MISSING__".
@@ -139,6 +140,13 @@ it is allowed for date_start and date_end to be "__MISSING__".
 
     # Validate schema (hard guardrail)
     spec = QuerySpec(**obj)
+
+    extracted_patient = extract_patient_from_text(question)
+    if extracted_patient is not None:
+        spec.patient = extracted_patient
+
+    if spec.metric == "__MISSING__" and is_duration_question(question):
+        spec.metric = "timestampms"
 
     # Normalize session formats like "session 2" -> "session_2"
     if spec.session is not None and spec.session != "__MULTI__":
@@ -207,4 +215,66 @@ it is allowed for date_start and date_end to be "__MISSING__".
     if spec.session is None and has_dates and spec.game is None:
         raise ValueError("For date-range queries, please specify the game (e.g., 'in game0 from 10/3/22 to 24/3/22').")
    
+    return spec
+
+
+def deterministic_question_to_query(question: str) -> QuerySpec:
+    """
+    Deterministically parse question into QuerySpec without LLM.
+    Uses regex/date parsing and metric aliases only.
+    """
+    obj = {
+        "action": "get_metric_timeseries",
+        "patient": "__MISSING__",
+        "metric": "__MISSING__",
+        "date_start": "__MISSING__",
+        "date_end": "__MISSING__",
+        "game": None,
+        "session": None,
+        "return_columns": ["date", "patient", "metric_value"],
+    }
+
+    patient = extract_patient_from_text(question)
+    if patient is not None:
+        obj["patient"] = patient
+
+    metric = extract_metric_from_text(question)
+    if metric is not None:
+        obj["metric"] = metric
+
+    # Game parsing: accept "game0" or "game 0"
+    games = re.findall(r"\bgame\s*\d+\b", question.lower())
+    if len(games) >= 2:
+        obj["game"] = "__MULTI__"
+    elif len(games) == 1:
+        obj["game"] = games[0].replace(" ", "")
+
+    # Session parsing
+    sessions = extract_sessions_from_text(question)
+    if len(sessions) >= 2:
+        obj["session"] = "__MULTI__"
+    elif len(sessions) == 1:
+        obj["session"] = sessions[0]
+
+    # Relative session cues: defer resolution
+    if detect_relative_session_cue(question) is not None:
+        obj["session"] = None
+
+    spec = QuerySpec(**obj)
+
+    if spec.session is not None and spec.session != "__MULTI__":
+        ns = normalize_session_string(spec.session)
+        if ns is not None:
+            spec.session = ns
+
+    spec.metric = normalize_metric_alias(spec.metric, question)
+
+    spec = apply_open_ended_date_logic(spec, question)
+
+    iso_pat = r"^\\d{4}-\\d{2}-\\d{2}$"
+    if spec.date_start != "__MISSING__" and not re.match(iso_pat, spec.date_start):
+        spec.date_start = parse_date_to_iso(spec.date_start)
+    if spec.date_end != "__MISSING__" and not re.match(iso_pat, spec.date_end):
+        spec.date_end = parse_date_to_iso(spec.date_end)
+
     return spec

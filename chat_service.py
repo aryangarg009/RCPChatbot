@@ -16,15 +16,17 @@ from config import (
 )
 from context import (
     apply_followup_context,
+    extract_patient_from_text,
     extract_metric_from_text,
     extract_metric_or_alias_from_definition_question,
     is_metric_definition_question,
+    is_gender_question,
     question_mentions_dates,
     question_mentions_game,
     question_mentions_patient,
     question_mentions_session,
 )
-from llm_client import llm_question_to_query
+from llm_client import llm_question_to_query, deterministic_question_to_query
 from narration import (
     narrate_point,
     narrate_session_comparison,
@@ -94,6 +96,62 @@ def process_question(question: str, df, context: Optional[Dict[str, Any]] = None
             "answer": "Context cleared. Ask a new question with patient/metric/date.",
             "data": None,
             "context": _context_from_state(None, None),
+        }
+
+    if is_gender_question(question):
+        patient = extract_patient_from_text(question)
+        if patient is None and last_spec is not None:
+            patient = last_spec.patient
+        if patient is None or patient == "__MISSING__":
+            return {
+                "type": "error",
+                "answer": "Please specify a patient to look up their gender.",
+                "data": None,
+                "context": _context_from_state(last_spec, last_session_range),
+            }
+        if "gender" not in df.columns:
+            return {
+                "type": "error",
+                "answer": "Gender column not found in the CSV.",
+                "data": None,
+                "context": _context_from_state(last_spec, last_session_range),
+            }
+        subset = df[df["patient"].astype(str).str.strip() == str(patient).strip()]
+        if subset.empty:
+            return {
+                "type": "error",
+                "answer": "No matching rows found for that patient.",
+                "data": None,
+                "context": _context_from_state(last_spec, last_session_range),
+            }
+        genders = (
+            subset["gender"]
+            .astype(str)
+            .str.strip()
+            .str.lower()
+            .replace({"m": "male", "f": "female"})
+        )
+        genders = {g for g in genders if g not in {"", "nan", "none"}}
+        if not genders:
+            return {
+                "type": "error",
+                "answer": "No gender data found for that patient.",
+                "data": None,
+                "context": _context_from_state(last_spec, last_session_range),
+            }
+        if len(genders) > 1:
+            return {
+                "type": "error",
+                "answer": f"Conflicting gender values found for patient {patient}.",
+                "data": None,
+                "context": _context_from_state(last_spec, last_session_range),
+            }
+        gender = sorted(genders)[0]
+        return {
+            "type": "gender",
+            "answer": f"Patient {patient} is {gender}.",
+            "data": {"patient": patient, "gender": gender},
+            "context": _context_from_state(last_spec, last_session_range),
         }
 
     # ---- METRIC DEFINITION MODE ----
@@ -176,8 +234,25 @@ def process_question(question: str, df, context: Optional[Dict[str, Any]] = None
             }
 
     # ---- LLM → QuerySpec ----
+    llm_error = None
     try:
         spec = llm_question_to_query(question)
+    except Exception as e:
+        llm_error = e
+        spec = None
+
+    if spec is None:
+        try:
+            spec = deterministic_question_to_query(question)
+        except Exception:
+            return {
+                "type": "error",
+                "answer": f"LLM request failed: {llm_error}",
+                "data": None,
+                "context": _context_from_state(last_spec, last_session_range),
+            }
+
+    try:
         spec = apply_followup_context(spec, question, last_spec)
 
         # Resolve relative session cues like "next/previous/first/latest session"
@@ -211,7 +286,7 @@ def process_question(question: str, df, context: Optional[Dict[str, Any]] = None
     except Exception as e:
         return {
             "type": "error",
-            "answer": f"LLM request failed: {e}",
+            "answer": f"Unexpected error: {e}",
             "data": None,
             "context": _context_from_state(last_spec, last_session_range),
         }
@@ -229,7 +304,7 @@ def process_question(question: str, df, context: Optional[Dict[str, Any]] = None
                 "data": None,
                 "context": _context_from_state(last_spec, last_session_range),
             }
-        if spec.patient_id == "__MISSING__":
+        if spec.patient == "__MISSING__":
             return {
                 "type": "error",
                 "answer": "Please specify a patient for this session range.",
@@ -279,7 +354,7 @@ def process_question(question: str, df, context: Optional[Dict[str, Any]] = None
                 "data": None,
                 "context": _context_from_state(last_spec, last_session_range),
             }
-        if spec.patient_id == "__MISSING__":
+        if spec.patient == "__MISSING__":
             return {
                 "type": "error",
                 "answer": "Please specify a patient for this session range.",
@@ -331,7 +406,7 @@ def process_question(question: str, df, context: Optional[Dict[str, Any]] = None
                 "data": None,
                 "context": _context_from_state(last_spec, last_session_range),
             }
-        if spec.patient_id == "__MISSING__":
+        if spec.patient == "__MISSING__":
             return {
                 "type": "error",
                 "answer": "Please specify a patient to compare.",
@@ -394,7 +469,7 @@ def process_question(question: str, df, context: Optional[Dict[str, Any]] = None
     # ---- POINT QUERY MODE ----
     if is_point_query(spec, results):
         point = format_point_result(results, spec.metric)
-        answer = narrate_point(point, spec.metric, spec.patient_id)
+        answer = narrate_point(point, spec.metric, spec.patient)
         last_spec = spec
         return {
             "type": "point",
@@ -425,6 +500,8 @@ def _should_code_fallback(error_answer: str) -> bool:
         return False
     lower = error_answer.strip().lower()
     if lower.startswith("please specify"):
+        return False
+    if lower.startswith("llm request failed"):
         return False
     if "not allowed" in lower or "metric '" in lower:
         return False

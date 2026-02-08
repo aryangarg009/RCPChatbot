@@ -40,6 +40,13 @@ def interpret_metric_change(metric_name: str, change: float) -> Optional[str]:
             return "reduced range of motion"
         return "similar range of motion over this period"
 
+    if metric_name == "timestampms":
+        if change > 0:
+            return "longer session duration"
+        if change < 0:
+            return "shorter session duration"
+        return "similar session duration over this period"
+
     return None
 
 def _metric_improvement_direction(metric_name: str) -> int:

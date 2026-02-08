@@ -19,6 +19,9 @@ METRIC_EXPLANATIONS: Dict[str, str] = {
         "Patient-applied force reflects how much force the patient is applying during the task. "
         "Higher values generally suggest greater force output."
     ),
+    "timestampms": (
+        "Session duration in milliseconds. Convert to minutes/seconds for readability."
+    ),
     # Add more over time...
 }
 
@@ -28,4 +31,5 @@ METRIC_DISPLAY_NAMES: Dict[str, str] = {
     "area": "range of motion (area)",
     "avg_efficiency": "efficiency",
     "avg_f_patient": "total force",
+    "timestampms": "session duration",
 }

@@ -42,11 +42,11 @@ def resolve_relative_session(
 ) -> Dict[str, Any]:
     """
     Resolve a relative session reference to an explicit session_id.
-    Requires patient_id and game from base_spec. Uses session number ordering.
+    Requires patient and game from base_spec. Uses session number ordering.
     """
     if base_spec.session is None:
         return {"error": "No base session in context to compare from."}
-    if base_spec.patient_id == "__MISSING__":
+    if base_spec.patient == "__MISSING__":
         return {"error": "No patient in context to compare."}
     if base_spec.game is None:
         return {"error": "No game in context to compare."}
@@ -62,7 +62,7 @@ def resolve_relative_session(
         return {"error": f"Could not parse session number from '{base_spec.session}'."}
 
     subset = df.copy()
-    subset = subset[subset["patient_id"].astype(str).str.strip() == base_spec.patient_id]
+    subset = subset[subset["patient"].astype(str).str.strip() == base_spec.patient]
     subset = subset[subset["game"].astype(str).str.strip() == base_spec.game]
 
     sessions = sorted({s for s in subset["session"].astype(str).str.strip() if s})
@@ -142,8 +142,8 @@ def _safe_metric_value(val: Any) -> Optional[float]:
 
 def run_query(df: pd.DataFrame, spec: QuerySpec) -> List[Dict[str, Any]]:
     missing = []
-    if spec.patient_id == "__MISSING__":
-        missing.append("patient_id")
+    if spec.patient == "__MISSING__":
+        missing.append("patient")
     if spec.metric == "__MISSING__":
         missing.append("metric")
 
@@ -172,7 +172,7 @@ def run_query(df: pd.DataFrame, spec: QuerySpec) -> List[Dict[str, Any]]:
         return [{"error": f"Metric column '{spec.metric}' not found in CSV."}]
 
     out = df.copy()
-    out = out[out["patient_id"].astype(str).str.strip() == spec.patient_id]
+    out = out[out["patient"].astype(str).str.strip() == spec.patient]
 
     if spec.game is not None:
         out = out[out["game"].astype(str).str.strip() == spec.game]
@@ -190,7 +190,7 @@ def run_query(df: pd.DataFrame, spec: QuerySpec) -> List[Dict[str, Any]]:
     for _, row in out.iterrows():
         rows.append({
             "date": row["date"].date().isoformat() if pd.notna(row["date"]) else None,
-            "patient_id": row["patient_id"],
+            "patient": row["patient"],
             "metric_value": _safe_metric_value(row[spec.metric]),
             "game": row.get("game", None),
             "session": row.get("session", None),
@@ -210,8 +210,8 @@ def run_session_range(
     """
     Query rows for a patient/game/metric across a continuous session range.
     """
-    if spec.patient_id == "__MISSING__":
-        return [{"error": "Missing required info: patient_id"}]
+    if spec.patient == "__MISSING__":
+        return [{"error": "Missing required info: patient"}]
     if spec.metric == "__MISSING__":
         return [{"error": "Missing required info: metric"}]
     if spec.game is None:
@@ -225,7 +225,7 @@ def run_session_range(
     lo, hi = (start_num, end_num) if start_num <= end_num else (end_num, start_num)
 
     out = df.copy()
-    out = out[out["patient_id"].astype(str).str.strip() == spec.patient_id]
+    out = out[out["patient"].astype(str).str.strip() == spec.patient]
     out = out[out["game"].astype(str).str.strip() == spec.game]
 
     def in_range(s: str) -> bool:
@@ -239,7 +239,7 @@ def run_session_range(
     for _, row in out.iterrows():
         rows.append({
             "date": row["date"].date().isoformat() if pd.notna(row["date"]) else None,
-            "patient_id": row["patient_id"],
+            "patient": row["patient"],
             "metric_value": _safe_metric_value(row[spec.metric]),
             "game": row.get("game", None),
             "session": row.get("session", None),
@@ -273,7 +273,7 @@ def compare_two_sessions(
         return {"error": "No base session in context to compare from."}
     if base_spec.metric == "__MISSING__":
         return {"error": "No metric in context to compare."}
-    if base_spec.patient_id == "__MISSING__":
+    if base_spec.patient == "__MISSING__":
         return {"error": "No patient in context to compare."}
 
     spec_a = base_spec.model_copy(deep=True)
@@ -336,7 +336,7 @@ def compare_two_sessions(
         relative_change_pct = (change_later_minus_earlier / abs(earlier_value)) * 100
 
     return {
-        "patient_id": base_spec.patient_id,
+        "patient": base_spec.patient,
         "game": base_spec.game,
         "metric": base_spec.metric,
         "session_a": spec_a.session,

@@ -14,14 +14,15 @@ ALLOWED_METRICS = sorted([
     "avg_efficiency",
     "avg_f_patient",
     "area",
+    "timestampms",
 ])
 
 ALLOWED_RETURN_COLUMNS = sorted([
-    "date", "patient_id", "game", "session",
+    "date", "patient", "game", "session", "gender",
     *ALLOWED_METRICS,
 ])
 
-ALLOWED_GAMES = [f"game{i}" for i in range(0, 3)]
+ALLOWED_GAMES = [f"game{i}" for i in range(0, 11)]
 ALLOWED_SESSIONS = [f"session_{i}" for i in range(1, 20000)]
 
 FOLLOWUP_CUES = [

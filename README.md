@@ -46,7 +46,7 @@ Note: the CLI is a thin wrapper around the same shared logic used by the HTTP AP
 ```bash
 curl http://localhost:8000/chat \
   -H "Content-Type: application/json" \
-  -d '{"message":"how has patient 45 m range of motion changed from 10/3/22 to 25/3/22 in game0?"}'
+  -d '{"message":"how has patient 46 range of motion changed from 2022-11-07 to 2022-11-10 in game0?"}'
 ```
 
 ## Notes
