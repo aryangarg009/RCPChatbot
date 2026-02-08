@@ -1,13 +1,17 @@
 # llm_client.py
 import json
+import os
 import re
 from typing import Optional
 
 import httpx
 from pydantic import ValidationError
 
+import config as cfg
 from config import (
-    LMSTUDIO_URL, MODEL,
+    PARSER_BACKEND,
+    OPENAI_API_BASE,
+    OPENAI_MODEL,
     ALLOWED_METRICS, ALLOWED_GAMES, ALLOWED_SESSIONS
 )
 from schema import QuerySpec
@@ -32,6 +36,12 @@ def extract_json_strict(text: str) -> str:
         raise ValueError("Model did not return a single JSON object.")
 
     return text
+
+def _get_openai_api_key() -> str:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY is not set.")
+    return api_key
 
 def normalize_llm_obj(obj: dict) -> dict:
     """
@@ -121,7 +131,7 @@ it is allowed for date_start and date_end to be "__MISSING__".
 """.strip()
 
     payload = {
-        "model": MODEL,
+        "model": OPENAI_MODEL,
         "temperature": 0,
         "messages": [
             {"role": "system", "content": system_prompt},
@@ -130,7 +140,19 @@ it is allowed for date_start and date_end to be "__MISSING__".
     }
 
     with httpx.Client(timeout=60.0) as client:
-        r = client.post(LMSTUDIO_URL, json=payload)
+        if PARSER_BACKEND.lower() == "lmstudio":
+            lmstudio_url = getattr(cfg, "LMSTUDIO_URL", None)
+            lmstudio_model = getattr(cfg, "MODEL", None)
+            if not lmstudio_url or not lmstudio_model:
+                raise ValueError("LM Studio parser selected but LMSTUDIO_URL/MODEL not configured.")
+            payload["model"] = lmstudio_model
+            r = client.post(lmstudio_url, json=payload)
+        else:
+            headers = {
+                "Authorization": f"Bearer {_get_openai_api_key()}",
+                "Content-Type": "application/json",
+            }
+            r = client.post(f"{OPENAI_API_BASE}/chat/completions", json=payload, headers=headers)
         r.raise_for_status()
         content = r.json()["choices"][0]["message"]["content"]
 
