@@ -1,26 +1,39 @@
 # chat_service.py
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, Optional, Tuple
 
 from pydantic import ValidationError
 
-from config import ALLOWED_GAMES, ALLOWED_METRICS, ALLOWED_SESSIONS, RESET_COMMANDS
+from config import (
+    ALLOWED_GAMES,
+    ALLOWED_METRICS,
+    ALLOWED_SESSIONS,
+    CSV_PATH,
+    ENABLE_CODE_FALLBACK,
+    RESET_COMMANDS,
+)
 from context import (
     apply_followup_context,
+    extract_patient_from_text,
     extract_metric_from_text,
+    extract_metric_or_alias_from_definition_question,
+    is_metric_definition_question,
+    is_gender_question,
     question_mentions_dates,
     question_mentions_game,
     question_mentions_patient,
     question_mentions_session,
 )
-from llm_client import llm_question_to_query
+from llm_client import llm_question_to_query, deterministic_question_to_query
 from narration import (
     narrate_point,
     narrate_session_comparison,
     narrate_session_range,
     narrate_timeseries,
 )
+from metrics import METRIC_EXPLANATIONS
 from query_engine import (
     compare_two_sessions,
     detect_relative_session_cue,
@@ -36,6 +49,7 @@ from summarizer import (
     summarize_session_range,
     summarize_timeseries,
 )
+from openai_fallback import OpenAIFallbackError, run_code_fallback
 
 
 def _is_session_range_question(text: str) -> bool:
@@ -84,6 +98,97 @@ def process_question(question: str, df, context: Optional[Dict[str, Any]] = None
             "context": _context_from_state(None, None),
         }
 
+    if is_gender_question(question):
+        patient = extract_patient_from_text(question)
+        if patient is None and last_spec is not None:
+            patient = last_spec.patient
+        if patient is None or patient == "__MISSING__":
+            return {
+                "type": "error",
+                "answer": "Please specify a patient to look up their gender.",
+                "data": None,
+                "context": _context_from_state(last_spec, last_session_range),
+            }
+        if "gender" not in df.columns:
+            return {
+                "type": "error",
+                "answer": "Gender column not found in the CSV.",
+                "data": None,
+                "context": _context_from_state(last_spec, last_session_range),
+            }
+        subset = df[df["patient"].astype(str).str.strip() == str(patient).strip()]
+        if subset.empty:
+            return {
+                "type": "error",
+                "answer": "No matching rows found for that patient.",
+                "data": None,
+                "context": _context_from_state(last_spec, last_session_range),
+            }
+        genders = (
+            subset["gender"]
+            .astype(str)
+            .str.strip()
+            .str.lower()
+            .replace({"m": "male", "f": "female"})
+        )
+        genders = {g for g in genders if g not in {"", "nan", "none"}}
+        if not genders:
+            return {
+                "type": "error",
+                "answer": "No gender data found for that patient.",
+                "data": None,
+                "context": _context_from_state(last_spec, last_session_range),
+            }
+        if len(genders) > 1:
+            return {
+                "type": "error",
+                "answer": f"Conflicting gender values found for patient {patient}.",
+                "data": None,
+                "context": _context_from_state(last_spec, last_session_range),
+            }
+        gender = sorted(genders)[0]
+        return {
+            "type": "gender",
+            "answer": f"Patient {patient} is {gender}.",
+            "data": {"patient": patient, "gender": gender},
+            "context": _context_from_state(last_spec, last_session_range),
+        }
+
+    # ---- METRIC DEFINITION MODE ----
+    # Only treat as a definition question if the user isn't asking about
+    # a specific patient/game/session/date.
+    if (
+        is_metric_definition_question(question)
+        and not question_mentions_patient(question)
+        and not question_mentions_game(question)
+        and not question_mentions_session(question)
+        and not question_mentions_dates(question)
+    ):
+        metric = extract_metric_or_alias_from_definition_question(question)
+        if metric is None:
+            return {
+                "type": "error",
+                "answer": "I’m not sure which metric you mean. Try: 'what is sparc?' or 'what does efficiency mean?'",
+                "data": None,
+                "context": _context_from_state(last_spec, last_session_range),
+            }
+
+        explanation = METRIC_EXPLANATIONS.get(metric)
+        if explanation is None:
+            return {
+                "type": "error",
+                "answer": f"I don’t have an explanation written yet for '{metric}', but I can add one.",
+                "data": None,
+                "context": _context_from_state(last_spec, last_session_range),
+            }
+
+        return {
+            "type": "definition",
+            "answer": explanation,
+            "data": {"metric": metric},
+            "context": _context_from_state(last_spec, last_session_range),
+        }
+
     # ---- SESSION COMPARISON MODE (follow-up) ----
     if ("differ" in ql or "difference" in ql or "compare" in ql) and last_spec is not None:
         # If user explicitly mentions patient/metric/game, treat as standalone compare
@@ -129,16 +234,47 @@ def process_question(question: str, df, context: Optional[Dict[str, Any]] = None
             }
 
     # ---- LLM → QuerySpec ----
+    llm_error = None
     try:
         spec = llm_question_to_query(question)
+    except Exception as e:
+        llm_error = e
+        spec = None
+
+    if spec is None:
+        try:
+            spec = deterministic_question_to_query(question)
+        except Exception:
+            return {
+                "type": "error",
+                "answer": f"LLM request failed: {llm_error}",
+                "data": None,
+                "context": _context_from_state(last_spec, last_session_range),
+            }
+
+    try:
         spec = apply_followup_context(spec, question, last_spec)
+
+        # Resolve relative session cues like "next/previous/first/latest session"
+        cue = detect_relative_session_cue(question)
+        if cue is not None:
+            if last_spec is None:
+                raise ValueError("No prior session in context to resolve a relative session.")
+            resolved = resolve_relative_session(df, last_spec, cue)
+            if "error" in resolved:
+                raise ValueError(resolved["error"])
+            spec.session = resolved["session"]
+            # Session-based query: clear date range
+            spec.date_start = "__MISSING__"
+            spec.date_end = "__MISSING__"
 
         if spec.metric not in ALLOWED_METRICS and spec.metric != "__MISSING__":
             raise ValueError(f"Metric '{spec.metric}' not allowed.")
         if spec.game is not None and spec.game not in ALLOWED_GAMES:
             raise ValueError(f"Game '{spec.game}' not allowed. Must be one of {ALLOWED_GAMES}.")
-        if spec.session is not None and spec.session != "__MULTI__" and spec.session not in ALLOWED_SESSIONS:
-            raise ValueError(f"Session '{spec.session}' not allowed. Must be one of {ALLOWED_SESSIONS}.")
+        if spec.session is not None and spec.session != "__MULTI__":
+            if re.match(r"^session_\d+$", str(spec.session)) is None:
+                raise ValueError(f"Session '{spec.session}' not allowed. Must match 'session_<number>'.")
 
     except (ValidationError, ValueError) as e:
         return {
@@ -150,7 +286,7 @@ def process_question(question: str, df, context: Optional[Dict[str, Any]] = None
     except Exception as e:
         return {
             "type": "error",
-            "answer": f"LLM request failed: {e}",
+            "answer": f"Unexpected error: {e}",
             "data": None,
             "context": _context_from_state(last_spec, last_session_range),
         }
@@ -168,7 +304,7 @@ def process_question(question: str, df, context: Optional[Dict[str, Any]] = None
                 "data": None,
                 "context": _context_from_state(last_spec, last_session_range),
             }
-        if spec.patient_id == "__MISSING__":
+        if spec.patient == "__MISSING__":
             return {
                 "type": "error",
                 "answer": "Please specify a patient for this session range.",
@@ -218,7 +354,7 @@ def process_question(question: str, df, context: Optional[Dict[str, Any]] = None
                 "data": None,
                 "context": _context_from_state(last_spec, last_session_range),
             }
-        if spec.patient_id == "__MISSING__":
+        if spec.patient == "__MISSING__":
             return {
                 "type": "error",
                 "answer": "Please specify a patient for this session range.",
@@ -270,7 +406,7 @@ def process_question(question: str, df, context: Optional[Dict[str, Any]] = None
                 "data": None,
                 "context": _context_from_state(last_spec, last_session_range),
             }
-        if spec.patient_id == "__MISSING__":
+        if spec.patient == "__MISSING__":
             return {
                 "type": "error",
                 "answer": "Please specify a patient to compare.",
@@ -333,7 +469,7 @@ def process_question(question: str, df, context: Optional[Dict[str, Any]] = None
     # ---- POINT QUERY MODE ----
     if is_point_query(spec, results):
         point = format_point_result(results, spec.metric)
-        answer = narrate_point(point, spec.metric, spec.patient_id)
+        answer = narrate_point(point, spec.metric, spec.patient)
         last_spec = spec
         return {
             "type": "point",
@@ -356,4 +492,57 @@ def process_question(question: str, df, context: Optional[Dict[str, Any]] = None
         "answer": answer,
         "data": {"spec": spec.model_dump(), "results": results, "summary": summary},
         "context": _context_from_state(last_spec, last_session_range),
+    }
+
+
+def _should_code_fallback(error_answer: str) -> bool:
+    if not ENABLE_CODE_FALLBACK:
+        return False
+    lower = error_answer.strip().lower()
+    if lower.startswith("please specify"):
+        return False
+    if lower.startswith("llm request failed"):
+        return False
+    if "not allowed" in lower or "metric '" in lower:
+        return False
+    if "context cleared" in lower:
+        return False
+    return True
+
+
+def process_question_with_fallback(
+    question: str, df, context: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    resp = process_question(question, df, context)
+    if resp.get("type") != "error":
+        return resp
+
+    error_answer = resp.get("answer", "")
+    if not _should_code_fallback(error_answer):
+        return resp
+
+    fallback_context = {
+        "deterministic_error": error_answer,
+        "context": resp.get("context"),
+    }
+
+    try:
+        result = run_code_fallback(question, CSV_PATH, fallback_context)
+    except OpenAIFallbackError as e:
+        resp["answer"] = f"{error_answer} (code fallback failed: {e})"
+        return resp
+    except Exception as e:
+        resp["answer"] = f"{error_answer} (code fallback error: {e})"
+        return resp
+
+    answer = result.get("answer") or "Fallback completed."
+    return {
+        "type": "code_fallback",
+        "answer": answer,
+        "data": {
+            "execution_path": "code_fallback",
+            "fallback_reason": error_answer,
+            "result": result,
+        },
+        "context": resp.get("context"),
     }

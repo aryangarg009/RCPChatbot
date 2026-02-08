@@ -19,12 +19,36 @@ def _choose_hedge_phrase(relative_change_pct: Optional[float]) -> str:
         return "is consistent with"
     return "suggests"
 
+def _format_duration_ms(value: Optional[float]) -> str:
+    if value is None:
+        return "unknown duration"
+    try:
+        total_seconds = int(round(abs(float(value)) / 1000.0))
+    except (TypeError, ValueError):
+        return "unknown duration"
+    minutes, seconds = divmod(total_seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    sign = "-" if value < 0 else ""
+    if hours > 0:
+        return f"{sign}{hours}h {minutes}m {seconds}s"
+    if minutes > 0:
+        return f"{sign}{minutes}m {seconds}s"
+    return f"{sign}{seconds}s"
+
+def _format_metric_value(metric: str, value: Optional[float]) -> str:
+    if metric == "timestampms":
+        return _format_duration_ms(value)
+    if value is None:
+        return "nan"
+    return f"{value:.6f}"
+
 def metric_display_name(metric: str) -> str:
     names = {
         "average_sparc": "smoothness (SPARC)",
         "avg_efficiency": "efficiency",
-        "f_patient": "total force",
+        "avg_f_patient": "total force",
         "area": "range of motion (area)",
+        "timestampms": "session duration",
     }
     return names.get(metric, metric)
 
@@ -33,7 +57,8 @@ def _metric_label(metric: str) -> str:
         "average_sparc": "movement smoothness",
         "area": "range of motion",
         "avg_efficiency": "movement efficiency",
-        "f_patient": "applied force",
+        "avg_f_patient": "applied force",
+        "timestampms": "session duration",
     }
     return labels.get(metric, metric)
 
@@ -72,10 +97,17 @@ def narrate_timeseries(summary: dict, spec) -> str:
     )
 
     # Change sentence
-    text += (
-        f"Over this period, the average {metric_label} "
-        f"{direction} by {abs(change):.4f}"
-    )
+    if metric == "timestampms":
+        change_text = _format_duration_ms(abs(change))
+        text += (
+            f"Over this period, the average {metric_label} "
+            f"{direction} by {change_text}"
+        )
+    else:
+        text += (
+            f"Over this period, the average {metric_label} "
+            f"{direction} by {abs(change):.4f}"
+        )
 
     if pct is not None:
         text += f", which corresponds to a {abs(pct):.2f}% change from the baseline."
@@ -112,7 +144,7 @@ def narrate_timeseries(summary: dict, spec) -> str:
 
     return text
 
-def narrate_point(point: Dict[str, Any], metric_name: str, patient_id: str) -> str:
+def narrate_point(point: Dict[str, Any], metric_name: str, patient: str) -> str:
     """
     Deterministic natural-language narration for a single-point result.
     """
@@ -125,7 +157,11 @@ def narrate_point(point: Dict[str, Any], metric_name: str, patient_id: str) -> s
     session = point.get("session")
     game = point.get("game")
 
-    parts = [f"For patient {patient_id}, the {metric_label} value is {value:.6f}"]
+    if metric_name == "timestampms":
+        value_text = _format_metric_value(metric_name, value)
+        parts = [f"For patient {patient}, the {metric_label} is {value_text}"]
+    else:
+        parts = [f"For patient {patient}, the {metric_label} value is {_format_metric_value(metric_name, value)}"]
 
     if session and game and date:
         parts.append(f"in {game}, {session} on {date}.")
@@ -147,7 +183,7 @@ def narrate_session_comparison(cmp_out: Dict[str, Any]) -> str:
     if "error" in cmp_out:
         return cmp_out["error"]
 
-    patient_id = cmp_out["patient_id"]
+    patient = cmp_out["patient"]
     game = cmp_out["game"]
     metric = cmp_out["metric"]
     session_earlier = cmp_out["session_earlier"]
@@ -167,13 +203,27 @@ def narrate_session_comparison(cmp_out: Dict[str, Any]) -> str:
     else:
         direction = "remained stable"
 
-    text = (
-        f"For patient {patient_id} in {game}, comparing {session_earlier} to {session_later}, "
-        f"the average {metric_label} {direction} by {abs(change):.4f} "
-        f"(from {value_earlier:.4f} to {value_later:.4f})."
-    )
+    if metric == "timestampms":
+        change_text = _format_duration_ms(abs(change))
+        earlier_text = _format_metric_value(metric, value_earlier)
+        later_text = _format_metric_value(metric, value_later)
+        text = (
+            f"For patient {patient} in {game}, comparing {session_earlier} to {session_later}, "
+            f"the average {metric_label} {direction} by {change_text} "
+            f"(from {earlier_text} to {later_text})."
+        )
+    else:
+        text = (
+            f"For patient {patient} in {game}, comparing {session_earlier} to {session_later}, "
+            f"the average {metric_label} {direction} by {abs(change):.4f} "
+            f"(from {value_earlier:.4f} to {value_later:.4f})."
+        )
 
-    text += f" The difference (earlier - later) is {diff_earlier_minus_later:.4f}."
+    if metric == "timestampms":
+        diff_text = _format_duration_ms(diff_earlier_minus_later)
+        text += f" The difference (earlier - later) is {diff_text}."
+    else:
+        text += f" The difference (earlier - later) is {diff_earlier_minus_later:.4f}."
 
     if pct is not None:
         text += f" This corresponds to a {abs(pct):.2f}% change relative to the earlier session."
@@ -206,10 +256,17 @@ def narrate_session_range(summary: dict, spec, session_start: str, session_end: 
     else:
         direction = "remained stable"
 
-    text = (
-        f"I found patient records from {start} to {end}. "
-        f"Over this session range, the average {metric_label} {direction} by {abs(change):.4f}"
-    )
+    if spec.metric == "timestampms":
+        change_text = _format_duration_ms(abs(change))
+        text = (
+            f"I found patient records from {start} to {end}. "
+            f"Over this session range, the average {metric_label} {direction} by {change_text}"
+        )
+    else:
+        text = (
+            f"I found patient records from {start} to {end}. "
+            f"Over this session range, the average {metric_label} {direction} by {abs(change):.4f}"
+        )
 
     if pct is not None:
         text += f", which corresponds to a {abs(pct):.2f}% change from the baseline."

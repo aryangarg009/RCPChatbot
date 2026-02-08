@@ -19,7 +19,7 @@ def interpret_metric_change(metric_name: str, change: float) -> Optional[str]:
             return "less smooth, jerkier, more interrupted movement"
         return "similar movement smoothness over this period"
 
-    if metric_name == "f_patient":
+    if metric_name == "avg_f_patient":
         if change > 0:
             return "increased strength output"
         if change < 0:
@@ -40,6 +40,13 @@ def interpret_metric_change(metric_name: str, change: float) -> Optional[str]:
             return "reduced range of motion"
         return "similar range of motion over this period"
 
+    if metric_name == "timestampms":
+        if change > 0:
+            return "longer session duration"
+        if change < 0:
+            return "shorter session duration"
+        return "similar session duration over this period"
+
     return None
 
 def _metric_improvement_direction(metric_name: str) -> int:
@@ -50,14 +57,7 @@ def _metric_improvement_direction(metric_name: str) -> int:
     higher_better = {
         "average_sparc",  # closer to 0 (often higher) is better
         "avg_efficiency",
-        "avg_path_ratio",
-        "avg_actual_len",
-        "avg_ideal_len",
-        "avg_excess_len",
-        "f_patient",
-        "avg_f_ee",
-        "diff_from_prev",
-        "improvement",
+        "avg_f_patient",
         "area",
     }
     if metric_name in higher_better:

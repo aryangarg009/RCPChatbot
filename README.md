@@ -32,19 +32,21 @@ Request:
 ```
 Response:
 ```json
-{"type":"timeseries|point|compare|session_range|error|reset","answer":"...","data":{...},"context":{...}}
+{"type":"timeseries|point|compare|session_range|code_fallback|error|reset","answer":"...","data":{...},"context":{...}}
 ```
 
 ### Run the CLI (local only)
 ```bash
 python chatbot.py
 ```
+Note: the CLI is a thin wrapper around the same shared logic used by the HTTP API
+(`process_question_with_fallback` in `chat_service.py`), so behavior should be identical.
 
 ### Quick test (API)
 ```bash
 curl http://localhost:8000/chat \
   -H "Content-Type: application/json" \
-  -d '{"message":"how has patient 45 m range of motion changed from 10/3/22 to 25/3/22 in game0?"}'
+  -d '{"message":"how has patient 46 range of motion changed from 2022-11-07 to 2022-11-10 in game0?"}'
 ```
 
 ## Notes
@@ -52,3 +54,18 @@ curl http://localhost:8000/chat \
 - LLM endpoint + model: `config.py`
 - LLM never sees CSV data. It only outputs JSON. All numbers are computed deterministically.
 
+## Provider-Managed Code Fallback (OpenAI)
+This repo can optionally fall back to OpenAI's code interpreter when the strict parser
+can't answer a question. This is disabled only if `ENABLE_CODE_FALLBACK = False`.
+
+### Setup
+Set your API key as an environment variable (do not hardcode it):
+```bash
+export OPENAI_API_KEY="your_key_here"
+```
+
+### What happens
+- The primary deterministic path runs first.
+- If it returns an error and the fallback policy allows it, the system calls OpenAI's
+  code interpreter with the CSV attached.
+- The response type is `code_fallback` with a structured result in `data.result`.
