@@ -10,10 +10,10 @@ from schema import QuerySpec
 def extract_sessions_from_text(question: str) -> List[str]:
     """
     Returns a list like ["session_2", "session_10"] if user mentions them.
-    Accepts 'session 2' or 'session_2'.
+    Accepts 'session 2'/'sessions 2' or 'session_2'.
     """
     q = question.lower()
-    matches = re.findall(r"\bsession[_\s]*(\d+)\b", q)
+    matches = re.findall(r"\bsessions?[_\s]*(\d+)\b", q)
     sessions = []
     for m in matches:
         sessions.append(f"session_{int(m)}")

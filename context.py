@@ -76,7 +76,7 @@ def question_mentions_game(question: str) -> bool:
     return re.search(r"\bgame\s*\d+\b", question, re.IGNORECASE) is not None
 
 def question_mentions_session(question: str) -> bool:
-    return re.search(r"\bsession[_\s]*\d+\b", question.lower()) is not None
+    return re.search(r"\bsessions?[_\s]*\d+\b", question.lower()) is not None
 
 def question_mentions_dates(question: str) -> bool:
     return any(p.search(question) for p in _DATE_PATTERNS)
@@ -98,7 +98,7 @@ def extract_patient_from_text(question: str) -> Optional[str]:
         return any(start <= idx < end for start, end in date_spans)
 
     game_nums = set(re.findall(r"\bgame\s*(\d+)\b", q))
-    session_nums = set(re.findall(r"\bsession[_\s]*(\d+)\b", q))
+    session_nums = set(re.findall(r"\bsessions?[_\s]*(\d+)\b", q))
 
     candidates = []
     for m in re.finditer(r"\b\d+\b", q):
@@ -150,6 +150,36 @@ def extract_metric_from_text(question: str) -> Optional[str]:
                 return metric
 
     return None
+
+def extract_metrics_from_text(question: str) -> list[str]:
+    """
+    Deterministically detect all metric names or aliases mentioned in user text.
+    Returns unique canonical metric names in mention-scan order.
+    """
+    q = question.lower()
+    q_norm = _normalize_alias_text(question)
+    found: list[str] = []
+
+    def _push(metric: str) -> None:
+        if metric not in found:
+            found.append(metric)
+
+    if is_duration_question(question):
+        _push("timestampms")
+
+    for m in ALLOWED_METRICS:
+        if re.search(rf"\b{re.escape(m.lower())}\b", q):
+            _push(m)
+
+    for phrase, metric in METRIC_ALIAS_MAP.items():
+        if " " in phrase:
+            if phrase in q_norm:
+                _push(metric)
+        else:
+            if re.search(rf"\b{re.escape(phrase)}\b", q_norm):
+                _push(metric)
+
+    return found
 
 def normalize_metric_alias(metric: str, question: Optional[str] = None) -> str:
     """

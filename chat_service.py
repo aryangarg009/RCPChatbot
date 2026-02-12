@@ -18,6 +18,7 @@ from context import (
     apply_followup_context,
     extract_patient_from_text,
     extract_metric_from_text,
+    extract_metrics_from_text,
     extract_metric_or_alias_from_definition_question,
     is_metric_definition_question,
     is_gender_question,
@@ -54,8 +55,10 @@ from openai_fallback import OpenAIFallbackError, run_code_fallback
 
 def _is_session_range_question(text: str) -> bool:
     t = text.lower()
-    return ("from session" in t and "to session" in t) or (
+    return ("from session" in t and "to session" in t) or ("from sessions" in t and "to sessions" in t) or (
         "between session" in t and "and session" in t
+    ) or (
+        "between sessions" in t and "and sessions" in t
     )
 
 
@@ -96,6 +99,18 @@ def process_question(question: str, df, context: Optional[Dict[str, Any]] = None
             "answer": "Context cleared. Ask a new question with patient/metric/date.",
             "data": None,
             "context": _context_from_state(None, None),
+        }
+
+    # Multi-metric session comparisons are routed to code fallback to avoid
+    # forcing a single-metric deterministic interpretation from context.
+    metrics_in_q = extract_metrics_from_text(question)
+    sessions_in_q = extract_sessions_from_text(question)
+    if ("compare" in ql or "differ" in ql or "difference" in ql) and len(metrics_in_q) >= 2 and len(sessions_in_q) >= 2:
+        return {
+            "type": "error",
+            "answer": "Multiple metrics were requested in one session comparison; using code fallback.",
+            "data": None,
+            "context": _context_from_state(last_spec, last_session_range),
         }
 
     if is_gender_question(question):
