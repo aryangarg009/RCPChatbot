@@ -14,6 +14,7 @@ You need Python 3.10 or higher.
 python3 -m venv .venv
 source .venv/bin/activate
 pip install fastapi uvicorn pandas python-dateutil httpx pydantic
+cp .env.example .env
 ```
 
 ### 3) Choose how questions are parsed
@@ -24,11 +25,15 @@ You have two options. Pick one.
    ```python
    PARSER_BACKEND = "openai"
    ```
-2. Set your OpenAI key in your terminal:
-   ```bash
-   export OPENAI_API_KEY="your_key_here"
+2. Set your parser key in `.env`:
+   ```dotenv
+   OPENAI_API_KEY_PARSER="your_parser_key_here"
    ```
-3. Done. This uses OpenAI to parse the question, then Python computes the answer.
+   Backward-compatible fallback:
+   ```dotenv
+   OPENAI_API_KEY="your_key_here"
+   ```
+3. Done. This uses OpenAI to parse the question, then Python computes the answer deterministically.
 
 #### Option B: LM Studio + OpenAI fallback (local parser + cloud fallback)
 1. Install and run LM Studio.
@@ -42,9 +47,13 @@ You have two options. Pick one.
    LMSTUDIO_URL = "http://127.0.0.1:1234/v1/chat/completions"
    MODEL = "qwen2.5-7b-instruct"
    ```
-5. Optional but recommended: Set your OpenAI key for code fallback:
-   ```bash
-   export OPENAI_API_KEY="your_key_here"
+5. Optional but recommended: Set your fallback key in `.env`:
+   ```dotenv
+   OPENAI_API_KEY_FALLBACK="your_fallback_key_here"
+   ```
+   Backward-compatible fallback:
+   ```dotenv
+   OPENAI_API_KEY="your_key_here"
    ```
 
 ### 4) Run the API (web/backend)
@@ -75,16 +84,38 @@ curl http://localhost:8000/chat \
 ## Notes
 - CSV source: `Combined_AllMetrics.csv`
 - Parser settings: `config.py`
+- This project auto-loads `.env` from the repo root for CLI and API runs.
 - LLM never sees CSV data. It only outputs JSON. All numbers are computed deterministically.
+
+## Query Run Logging (CSV)
+Every query run is logged automatically (CLI and API) to:
+- `query_metrics_log.csv` (repo root)
+
+Columns:
+- `input_query`
+- `latency_ms`
+- `path` (`deterministic` or `code_fallback`)
+- `type` (for example: `timeseries`, `point`, `session_range`, `compare`, `error`, `code_fallback`)
+- `output` (final answer text returned to the user)
+
+Optional overrides in `.env`:
+```dotenv
+ENABLE_QUERY_LOG_CSV=true
+QUERY_LOG_CSV_PATH="query_metrics_log.csv"
+```
 
 ## Provider-Managed Code Fallback (OpenAI)
 This repo can optionally fall back to OpenAI's code interpreter when the strict parser
 can't answer a question. This is disabled only if `ENABLE_CODE_FALLBACK = False`.
 
 ### Setup
-Set your API key as an environment variable (do not hardcode it):
-```bash
-export OPENAI_API_KEY="your_key_here"
+Set your fallback key in `.env`:
+```dotenv
+OPENAI_API_KEY_FALLBACK="your_fallback_key_here"
+```
+Backward-compatible fallback:
+```dotenv
+OPENAI_API_KEY="your_key_here"
 ```
 
 ### What happens

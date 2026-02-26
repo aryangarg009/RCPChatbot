@@ -38,9 +38,14 @@ def extract_json_strict(text: str) -> str:
     return text
 
 def _get_openai_api_key() -> str:
-    api_key = os.getenv("OPENAI_API_KEY")
+    """
+    Parser key resolution order:
+    1) OPENAI_API_KEY_PARSER
+    2) OPENAI_API_KEY (backward-compatible default)
+    """
+    api_key = os.getenv("OPENAI_API_KEY_PARSER") or os.getenv("OPENAI_API_KEY")
     if not api_key:
-        raise ValueError("OPENAI_API_KEY is not set.")
+        raise ValueError("Set OPENAI_API_KEY_PARSER (or OPENAI_API_KEY) for OpenAI parser calls.")
     return api_key
 
 def normalize_llm_obj(obj: dict) -> dict:

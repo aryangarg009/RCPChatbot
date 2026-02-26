@@ -48,6 +48,28 @@ def _print_fallback_payload(result: Dict[str, Any]) -> None:
             print(f"- {w}")
 
 
+def _execution_path_label(resp: Dict[str, Any]) -> str:
+    existing = resp.get("execution_path")
+    if isinstance(existing, str) and existing:
+        return existing
+
+    rtype = resp.get("type")
+    if rtype == "code_fallback":
+        return "code_fallback"
+    answer = str(resp.get("answer", "")).lower()
+    if "(code fallback failed:" in answer or "(code fallback error:" in answer:
+        return "fallback_attempted_failed"
+    return "deterministic"
+
+
+def _print_latency(resp: Dict[str, Any], elapsed_ms: Optional[float] = None) -> None:
+    if elapsed_ms is None:
+        elapsed_ms = float(resp.get("latency_ms", 0.0))
+    path = _execution_path_label(resp)
+    rtype = str(resp.get("type"))
+    print(f"[Latency] {elapsed_ms:.2f} ms | path: {path} | type: {rtype}")
+
+
 def _render_response(resp: Dict[str, Any]) -> None:
     rtype = resp.get("type")
     answer = resp.get("answer", "")
@@ -132,6 +154,7 @@ def main() -> None:
         resp = process_question_with_fallback(q, df, context)
         context = resp.get("context")
         _render_response(resp)
+        _print_latency(resp)
 
 
 if __name__ == "__main__":

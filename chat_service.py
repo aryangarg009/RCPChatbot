@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import time
 from typing import Any, Dict, Optional, Tuple
 
 from pydantic import ValidationError
@@ -51,6 +52,7 @@ from summarizer import (
     summarize_timeseries,
 )
 from openai_fallback import OpenAIFallbackError, run_code_fallback
+from query_logging import log_query_row
 
 
 def _is_session_range_question(text: str) -> bool:
@@ -528,13 +530,33 @@ def _should_code_fallback(error_answer: str) -> bool:
 def process_question_with_fallback(
     question: str, df, context: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
+    started = time.perf_counter()
+
+    def _finalize(resp: Dict[str, Any]) -> Dict[str, Any]:
+        latency_ms = (time.perf_counter() - started) * 1000.0
+        execution_path = "code_fallback" if resp.get("type") == "code_fallback" else "deterministic"
+        resp["latency_ms"] = latency_ms
+        resp["execution_path"] = execution_path
+        try:
+            log_query_row(
+                input_query=question,
+                latency_ms=float(resp["latency_ms"]),
+                execution_path=execution_path,
+                response_type=str(resp.get("type", "")),
+                output=str(resp.get("answer", "")),
+            )
+        except Exception:
+            # Logging should never block chat responses.
+            pass
+        return resp
+
     resp = process_question(question, df, context)
     if resp.get("type") != "error":
-        return resp
+        return _finalize(resp)
 
     error_answer = resp.get("answer", "")
     if not _should_code_fallback(error_answer):
-        return resp
+        return _finalize(resp)
 
     fallback_context = {
         "deterministic_error": error_answer,
@@ -545,13 +567,13 @@ def process_question_with_fallback(
         result = run_code_fallback(question, CSV_PATH, fallback_context)
     except OpenAIFallbackError as e:
         resp["answer"] = f"{error_answer} (code fallback failed: {e})"
-        return resp
+        return _finalize(resp)
     except Exception as e:
         resp["answer"] = f"{error_answer} (code fallback error: {e})"
-        return resp
+        return _finalize(resp)
 
     answer = result.get("answer") or "Fallback completed."
-    return {
+    return _finalize({
         "type": "code_fallback",
         "answer": answer,
         "data": {
@@ -560,4 +582,4 @@ def process_question_with_fallback(
             "result": result,
         },
         "context": resp.get("context"),
-    }
+    })

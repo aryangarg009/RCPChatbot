@@ -39,9 +39,14 @@ def _extract_output_text(resp_json: Dict[str, Any]) -> str:
 
 
 def _get_api_key() -> str:
-    api_key = os.getenv("OPENAI_API_KEY")
+    """
+    Fallback key resolution order:
+    1) OPENAI_API_KEY_FALLBACK
+    2) OPENAI_API_KEY (backward-compatible default)
+    """
+    api_key = os.getenv("OPENAI_API_KEY_FALLBACK") or os.getenv("OPENAI_API_KEY")
     if not api_key:
-        raise OpenAIFallbackError("OPENAI_API_KEY is not set.")
+        raise OpenAIFallbackError("Set OPENAI_API_KEY_FALLBACK (or OPENAI_API_KEY) for code fallback.")
     return api_key
 
 
