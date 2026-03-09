@@ -131,12 +131,11 @@ def is_point_query(spec: QuerySpec, results: List[Dict[str, Any]]) -> bool:
     """
     True if:
     - explicit session, OR
-    - exactly one unique date in results
+    - exactly one returned row
     """
     if spec.session is not None:
         return True
-    dates = {r.get("date") for r in results if "date" in r}
-    return len(dates) == 1
+    return len(results) == 1
 
 def format_point_result(results: List[Dict[str, Any]], metric_name: str) -> Dict[str, Any]:
     if len(results) == 1:

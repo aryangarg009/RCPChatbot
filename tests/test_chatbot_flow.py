@@ -299,6 +299,27 @@ def test_duration_query_returns_readable_time(monkeypatch: pytest.MonkeyPatch, t
     assert out["type"] == "point"
     assert "session duration" in out["answer"]
     assert "m" in out["answer"] or "s" in out["answer"]
+    assert "In daily life, this equates to" in out["answer"]
+    assert "It is suggested to" in out["answer"]
+    assert "Trend summary:" not in out["answer"]
+
+
+def test_low_efficiency_includes_targeted_actions_and_games(monkeypatch: pytest.MonkeyPatch, tiny_df) -> None:
+    q = "how has patient 46 efficiency changed from 7th November 2022 to 10th November 2022 in game0?"
+    mapping = {
+        q: make_llm_json(patient="46", metric="avg_efficiency", game="game0"),
+    }
+    install_llm_stub(monkeypatch, mapping)
+
+    bot = ChatbotHarness(tiny_df)
+    out = bot.ask(q)
+
+    assert out["type"] == "timeseries"
+    assert "In daily life, this equates to" in out["answer"]
+    assert "It is suggested to" in out["answer"]
+    assert "Trend summary:" not in out["answer"]
+    assert "Race Car (game 6)" in out["answer"]
+    assert "Flower Shop (game 7)" in out["answer"]
 
 
 def test_gender_question_is_detected(tiny_df) -> None:

@@ -180,9 +180,11 @@ def run_query(df: pd.DataFrame, spec: QuerySpec) -> List[Dict[str, Any]]:
         out = out[out["session"].astype(str).str.strip() == spec.session]
 
     if spec.date_start != "__MISSING__" and spec.date_end != "__MISSING__":
-        start_dt = pd.to_datetime(spec.date_start, errors="raise")
-        end_dt = pd.to_datetime(spec.date_end, errors="raise")
-        out = out[(out["date"] >= start_dt) & (out["date"] <= end_dt)]
+        start_dt = pd.to_datetime(spec.date_start, errors="raise").normalize()
+        end_dt = pd.to_datetime(spec.date_end, errors="raise").normalize()
+        # Date filters are day-level; ignore time-of-day so same-day queries include all rows.
+        date_only = pd.to_datetime(out["date"], errors="coerce").dt.normalize()
+        out = out[(date_only >= start_dt) & (date_only <= end_dt)]
 
     out = out.sort_values(["date", "game", "session"])
 
