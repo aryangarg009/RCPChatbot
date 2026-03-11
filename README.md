@@ -104,6 +104,9 @@ ENABLE_QUERY_LOG_CSV=true
 QUERY_LOG_CSV_PATH="query_metrics_log.csv"
 ```
 
+Reserved file:
+- `query_metrics_log_evaluation_run.csv` is treated as a protected test fixture and will not be appended to by runtime logging, even if `QUERY_LOG_CSV_PATH` is pointed at it.
+
 ## Provider-Managed Code Fallback (OpenAI)
 This repo can optionally fall back to OpenAI's code interpreter when the strict parser
 can't answer a question. This is disabled only if `ENABLE_CODE_FALLBACK = False`.

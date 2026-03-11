@@ -8,13 +8,21 @@ from config import ENABLE_QUERY_LOG_CSV, QUERY_LOG_CSV_PATH
 
 _LOG_HEADERS = ["input_query", "latency_ms", "path", "type", "output"]
 _WRITE_LOCK = threading.Lock()
+_PROJECT_ROOT = Path(__file__).resolve().parent
+DEFAULT_QUERY_LOG_CSV_PATH = _PROJECT_ROOT / "query_metrics_log.csv"
+PROTECTED_QUERY_LOG_PATHS = {
+    (_PROJECT_ROOT / "query_metrics_log_evaluation_run.csv").resolve(),
+}
 
 
 def _resolve_log_path() -> Path:
     path = Path(QUERY_LOG_CSV_PATH)
-    if path.is_absolute():
-        return path
-    return Path(__file__).resolve().parent / path
+    if not path.is_absolute():
+        path = _PROJECT_ROOT / path
+    resolved = path.resolve()
+    if resolved in PROTECTED_QUERY_LOG_PATHS:
+        return DEFAULT_QUERY_LOG_CSV_PATH
+    return resolved
 
 
 def log_query_row(
