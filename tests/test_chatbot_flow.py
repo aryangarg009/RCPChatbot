@@ -262,8 +262,8 @@ def tiny_df() -> pd.DataFrame:
                 ]
             ),
             "timestampms": [90000, 120000, 60000],
-            "avg_efficiency": [0.8, 0.9, 0.7],
-            "area": [0.1, 0.12, 0.08],
+            "avg_efficiency": [80.0, 90.0, 70.0],
+            "area": [0.020057275, 0.01719195, 0.014326625],
             "average_sparc": [-2.0, -2.1, -2.2],
             "avg_f_patient": [-10.0, -12.0, -9.0],
         }
@@ -320,6 +320,22 @@ def test_low_efficiency_includes_targeted_actions_and_games(monkeypatch: pytest.
     assert "Trend summary:" not in out["answer"]
     assert "Race Car (game 6)" in out["answer"]
     assert "Flower Shop (game 7)" in out["answer"]
+
+
+def test_rom_output_uses_functional_range_percentages(monkeypatch: pytest.MonkeyPatch, tiny_df) -> None:
+    q = "tell me about patient 46 range of motion in session 2 in game0"
+    mapping = {
+        q: make_llm_json(patient="46", metric="area", game="game0", session="session_2"),
+    }
+    install_llm_stub(monkeypatch, mapping)
+
+    bot = ChatbotHarness(tiny_df)
+    out = bot.ask(q)
+
+    assert out["type"] == "point"
+    assert "roughly 63% of full functional range" in out["answer"]
+    assert "Fishing (game 1)" in out["answer"]
+    assert "Restaurant (game 5)" in out["answer"]
 
 
 def test_gender_question_is_detected(tiny_df) -> None:

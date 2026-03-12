@@ -117,46 +117,46 @@ CLINICAL_GUIDANCE: Dict[str, Dict[str, Any]] = {
     },
     "avg_efficiency": {
         "descending": True,
-        "interval": 0.0625,
+        "interval": 6.25,
         "bands": [
             {
                 "name": "Optimal",
-                "start": 0.95,
+                "start": 95.0,
                 "adl": "Straight movement path, like drawing a clean line between targets.",
             },
             {
                 "name": "Near Optimal",
-                "start": 0.8875,
+                "start": 88.75,
                 "adl": "Almost straight movement path with only minor detours.",
             },
             {
                 "name": "Mild",
-                "start": 0.825,
+                "start": 82.5,
                 "adl": "Noticeable detours; hand path is less direct during reach tasks.",
             },
             {
                 "name": "Moderate",
-                "start": 0.7625,
+                "start": 76.25,
                 "adl": "Curved hand path with extra steps before reaching the target.",
             },
             {
                 "name": "Significant",
-                "start": 0.7,
+                "start": 70.0,
                 "adl": "Roundabout pathing that can slow self-care movements.",
             },
             {
                 "name": "Severe",
-                "start": 0.6375,
+                "start": 63.75,
                 "adl": "Frequent wandering from the intended path during controlled movement.",
             },
             {
                 "name": "Very Severe",
-                "start": 0.575,
+                "start": 57.5,
                 "adl": "Looping movement patterns that reduce precision and efficiency.",
             },
             {
                 "name": "Extreme",
-                "start": 0.4,
+                "start": 40.0,
                 "adl": "Path appears lost/disorganized, affecting directed hand function.",
             },
         ],
@@ -168,6 +168,61 @@ CLINICAL_GUIDANCE: Dict[str, Dict[str, Any]] = {
         "maintain_action": (
             "maintain coordination progression in Race Car (game 6) and Flower Shop (game 7), "
             "increasing path complexity while preserving accuracy."
+        ),
+    },
+    "area": {
+        "descending": True,
+        "interval": 0.002865325,
+        "bands": [
+            {
+                "name": "Optimal",
+                "start": 0.020057275,
+                "adl": "roughly 88% of full functional range",
+            },
+            {
+                "name": "Near Optimal",
+                "start": 0.01719195,
+                "adl": "roughly 75% of full functional range",
+            },
+            {
+                "name": "Mild",
+                "start": 0.014326625,
+                "adl": "roughly 63% of full functional range",
+            },
+            {
+                "name": "Moderate",
+                "start": 0.0114613,
+                "adl": "roughly 50% of full functional range",
+            },
+            {
+                "name": "Significant",
+                "start": 0.008595975,
+                "adl": "roughly 38% of full functional range",
+            },
+            {
+                "name": "Severe",
+                "start": 0.00573065,
+                "adl": "roughly 25% of full functional range",
+            },
+            {
+                "name": "Very Severe",
+                "start": 0.002865325,
+                "adl": "roughly 13% of full functional range",
+            },
+            {
+                "name": "Extreme",
+                "start": 0.0,
+                "adl": "roughly 0% of full functional range",
+            },
+        ],
+        "games": [("Fishing", 1), ("Restaurant", 5)],
+        "low_actions": [
+            "prioritize H-Man games Fishing (game 1) and Restaurant (game 5) with larger reach targets before narrowing the workspace.",
+            "In therapy, focus on active-assisted reaching, repeated end-range practice, and controlled holds near the current limit of motion.",
+        ],
+        "maintain_action": (
+            "maintain ROM progression in Fishing (game 1) and Restaurant (game 5), "
+            "gradually increasing reach amplitude while preserving control."
         ),
     },
 }
@@ -319,11 +374,6 @@ def _is_stagnating(metric: str, trend_label: Optional[str], change: Optional[flo
 def _daily_life_impact(metric: str, current_value: Optional[float], band: Optional[Dict[str, Any]]) -> str:
     if band is not None:
         return str(band["adl"]).strip().rstrip(".")
-    if metric == "area":
-        return (
-            "ROM-specific daily-life mapping is not configured yet; "
-            "ROM analogies will be added once bounds are provided."
-        )
     if metric == "timestampms":
         return (
             "Session duration is a workload/endurance context metric, "
@@ -340,11 +390,6 @@ def _action_suggestions(
 ) -> str:
     cfg = CLINICAL_GUIDANCE.get(metric)
     if cfg is None:
-        if metric == "area":
-            return (
-                "ROM action mapping is pending. Once ROM bounds are added, "
-                "this section will include targeted H-Man games and therapy priorities."
-            )
         if metric == "timestampms":
             return (
                 "Use duration with SPARC, force, and path efficiency results "
